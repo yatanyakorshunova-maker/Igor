@@ -1,0 +1,133 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Check game logic
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Compile Python files
+        run: python -m py_compile main.py game_logic.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  build-apk:
+    name: Build debug APK
+    needs: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BUILDOZER_WARN_ON_ROOT: "0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache Android downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer/android/packages
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-downloads-v3-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            android-downloads-v3-${{ runner.os }}-
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            autoconf \
+            automake \
+            build-essential \
+            ccache \
+            cmake \
+            gettext \
+            git \
+            libffi-dev \
+            libltdl-dev \
+            libssl-dev \
+            libtool \
+            patch \
+            pkg-config \
+            python3-pip \
+            python3-setuptools \
+            python3-venv \
+            unzip \
+            zip \
+            zlib1g-dev
+          libtoolize --version
+          dpkg -s libltdl-dev | grep '^Status'
+
+      - name: Install Buildozer
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "buildozer==1.6.0" "Cython<3.0"
+          buildozer --version
+
+      - name: Start from a clean local build directory
+        run: |
+          rm -rf .buildozer
+          rm -rf bin
+
+      - name: Show pinned Android build settings
+        run: |
+          grep -E '^(requirements|android.api|android.minapi|android.ndk|android.archs|p4a.branch)' buildozer.spec
+
+      - name: Build APK
+        run: buildozer -v android debug
+
+      - name: Prepare downloadable APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ORIGINAL_APK="$(find bin -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$ORIGINAL_APK"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          FINAL_APK="bin/digital-pet-${SHORT_SHA}-debug.apk"
+          cp "$ORIGINAL_APK" "$FINAL_APK"
+          sha256sum "$FINAL_APK" > bin/SHA256SUMS.txt
+          ls -lh bin
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digital-pet-apk
+          path: |
+            bin/digital-pet-*-debug.apk
+            bin/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
