@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Kivy / Buildozer
+.buildozer/
+bin/
+*.apk
+*.aab
+
+# Local game save
+pet_save.json
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
